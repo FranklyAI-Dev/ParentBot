@@ -19,23 +19,15 @@ genai.configure(api_key=api_key)
 # --- 2. PROMPT ENGINEERING (THE "PERSONALITY") ---
 
 SYSTEM_INSTRUCTION = """
-You are a helpful and friendly assistant for the "Adventure Pathways Early Learning Centre".
-Your name is 'Turmeric the Cat'.
+You are a helpful and friendly assistant for the "Frank's Funtime Childcare Centre".
+Your name is 'Franky the Wombat'.
 You must answer questions based *only* on the context provided.
 If the answer is not in the provided documents, you MUST say:
 "I'm sorry, I don't have that information. Please contact the centre directly for more details."
-
----
-FORMATTING RULES:
-- Always use Markdown for formatting (like bolding, new lines, and bullet points) to make your answers easy to read.
-- For any lists, you MUST use bullet points (using a * or -).
----
-
 Do not make up information. Be professional, cheerful, and helpful.
 """
 
 # Initialize the Gemini Model *with* the system instruction
-# This fixes the 'system_instruction' error
 model = genai.GenerativeModel(
     'gemini-2.5-pro',
     system_instruction=SYSTEM_INSTRUCTION
@@ -95,6 +87,12 @@ def load_documents_on_startup():
 
 # --- 4. FLASK ROUTES (THE API) ---
 
+# !!! THIS IS THE FIX !!!
+# We call the function here, at the top level.
+# This ensures it runs when Gunicorn imports the file.
+load_documents_on_startup()
+# !!! END OF FIX !!!
+
 @app.route('/')
 def index():
     """Serves the main index.html file."""
@@ -106,33 +104,23 @@ def chat():
     
     data = request.json
     user_message = data.get('message')
-    # This is the simple history from the browser:
-    # [ {'role': 'user', 'text': '...'}, {'role': 'model', 'text': '...'} ]
     chat_history = data.get('history', []) 
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
     try:
-        # --- THIS IS THE FIX for the ['role', 'text'] error ---
-        # We must reformat the simple history into the format
-        # the Google API library expects.
-        
         formatted_history = []
         for message in chat_history:
-            # The API expects {'role': '...', 'parts': [{'text': '...'}]}
             formatted_history.append({
                 "role": message["role"],
                 "parts": [{"text": message["text"]}]
             })
-        # --- END OF THE FIX ---
         
-        # Start a chat session with the *formatted* history
         chat_session = model.start_chat(
             history=formatted_history
         )
         
-        # Build the RAG prompt
         rag_prompt = f"""
         Here is the context from our centre's documents:
         --- CONTEXT START ---
@@ -143,10 +131,8 @@ def chat():
         Question: "{user_message}"
         """
 
-        # Send the message to Gemini
         response = chat_session.send_message(rag_prompt)
         
-        # Return only the AI's reply
         return jsonify({"reply": response.text})
 
     except Exception as e:
@@ -156,5 +142,6 @@ def chat():
 # --- 5. RUN THE APP ---
 
 if __name__ == '__main__':
-    load_documents_on_startup()
+    # We leave this here for local testing
+    # (though it's already been called up top)
     app.run(port=5000, debug=True)
